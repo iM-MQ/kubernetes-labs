@@ -1,0 +1,15 @@
+# Real secret values: never commit
+*secret*.local.yaml
+.env
+
+# Terraform (used in Lab 05)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+tfplan
+*.tfplan
+
+# Kubeconfig files: contain cluster credentials
+kubeconfig
+*.kubeconfig
