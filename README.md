@@ -9,7 +9,7 @@ These labs follow on from my [Docker Asset Register](https://github.com/iM-MQ/do
 | Lab | Topic | Status |
 |---|---|---|
 | [01](lab-01-first-cluster) | A local cluster, pods, `kubectl` and the first YAML manifest | Complete ✅ |
-| 02 | Deployments: scaling, self-healing and rolling updates | Planned ⏳ |
+| [02](lab-02-deployments) | Deployments: self-healing, scaling, drift, rolling updates and rollback | Complete ✅ |
 | 03 | Services: giving an app a stable address | Planned ⏳ |
 | 04 | The Asset Register and PostgreSQL on Kubernetes, with ConfigMaps and Secrets | Planned ⏳ |
 | 05 | Capstone: AKS built with Terraform, running the Asset Register | Planned ⏳ |
