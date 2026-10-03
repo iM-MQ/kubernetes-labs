@@ -300,3 +300,18 @@ Then I reopened the tunnel, and nginx loaded.
 - Setting requests and limits matters. Without them a pod is `BestEffort` and can use as much as it likes.
 - The **Events** section of `kubectl describe` is the first place to look when a pod does not behave as expected.
 - When something unexpected answers on a port, check what else is already listening on it.
+
+---
+
+## References
+
+Official documentation I used while building and testing this lab.
+
+| What I did | Documentation |
+|---|---|
+| Enabled Kubernetes in Docker Desktop (Kubeadm) and checked the node | [Explore the Kubernetes view (Docker Desktop)](https://docs.docker.com/desktop/use-desktop/kubernetes/) |
+| Ran my first Pod | [Pods](https://kubernetes.io/docs/concepts/workloads/pods/) |
+| Wrote the Pod manifest (apiVersion, kind, metadata, spec) | [Objects In Kubernetes](https://kubernetes.io/docs/concepts/overview/working-with-objects/) |
+| Set CPU and memory requests and limits | [Resource Management for Pods and Containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) |
+| Checked which QoS class the Pod was given | [Pod Quality of Service Classes](https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/) |
+| Inspected and managed the Pod with kubectl | [kubectl Quick Reference](https://kubernetes.io/docs/reference/kubectl/quick-reference/) |
