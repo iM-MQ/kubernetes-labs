@@ -11,7 +11,7 @@ These labs follow on from my [Docker Asset Register](https://github.com/iM-MQ/do
 | [01](lab-01-first-cluster) | A local cluster, pods, `kubectl` and the first YAML manifest | Complete ✅ |
 | [02](lab-02-deployments) | Deployments: self-healing, scaling, drift, rolling updates and rollback | Complete ✅ |
 | [03](lab-03-services) | Services: stable addresses, load balancing, external access and selector debugging | Complete ✅ |
-| 04 | The Asset Register and PostgreSQL on Kubernetes, with ConfigMaps and Secrets | Planned ⏳ |
+| [04](lab-04-asset-register) | The Asset Register and PostgreSQL on Kubernetes: Secret, ConfigMap, PVC, init container and probes | Complete ✅ |
 | 05 | Capstone: AKS built with Terraform, running the Asset Register | Planned ⏳ |
 
 ## What is Kubernetes?
