@@ -2,7 +2,7 @@
 
 Hands-on labs learning **Kubernetes**, starting with a local cluster and working up to **Azure Kubernetes Service (AKS)** built with Terraform. Each lab is written up with the commands I ran, what I saw and the problems I hit along the way.
 
-These labs follow on from my [Docker Asset Register](https://github.com/iM-MQ/docker-asset-register) and [Terraform Azure Labs](https://github.com/iM-MQ/terraform-azure-labs). The end goal is to run the same Asset Register application on Kubernetes.
+These labs follow on from my [Docker Asset Register](https://github.com/iM-MQ/docker-asset-register) and [Terraform Azure Labs](https://github.com/iM-MQ/terraform-azure-labs). The aim is to run the same Asset Register application on Kubernetes: [Lab 04](lab-04-asset-register) runs it on my local cluster with its PostgreSQL database, and Lab 05 will run it on AKS built with Terraform.
 
 **Requires:** Docker Desktop with Kubernetes enabled. See [Prerequisites](#prerequisites).
 
