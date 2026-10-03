@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asset-config
+  labels:
+    app: asset-register
+data:
+  DB_HOST: postgres
+  DB_NAME: assets
+  DB_USER: assetapp

@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asset-register
+  labels:
+    app: asset-register
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: asset-register
+  template:
+    metadata:
+      labels:
+        app: asset-register
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - until pg_isready -h "$DB_HOST" -p 5432; do echo "waiting for postgres"; sleep 2; done
+          envFrom:
+            - configMapRef:
+                name: asset-config
+      containers:
+        - name: web
+          image: ghcr.io/im-mq/docker-asset-register:295b250c1913f1f0a4afb685b95c44664b962bd3
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: asset-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: asset-db
+                  key: password
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: asset-register
+  labels:
+    app: asset-register
+spec:
+  type: LoadBalancer
+  selector:
+    app: asset-register
+  ports:
+    - port: 8082
+      targetPort: 5000
