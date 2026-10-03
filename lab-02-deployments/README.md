@@ -352,3 +352,18 @@ Deleting the Deployment removed both ReplicaSets and all the pods. The pods show
 - Rolling updates replace pods gradually and only continue when new pods are healthy, so a broken release stalls rather than causing an outage.
 - `rollout undo` fixes the cluster, not the file. Correcting the file is part of the fix, not an afterthought.
 - When a change does not behave as expected, check the file on disk rather than what I think I saved.
+
+---
+
+## References
+
+Official documentation I used while building, testing and debugging this lab.
+
+| What I did | Documentation |
+|---|---|
+| Ran the app as a Deployment instead of a bare Pod | [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) |
+| Deleted Pods and watched the ReplicaSet replace them | [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/) |
+| Scaled the Deployment up and down | [Horizontal Manual Scaling for a Deployment](https://kubernetes.io/docs/tasks/run-application/scale-deployment/) |
+| Rolled out a new image version with a rolling update | [Update a Deployment Without Downtime](https://kubernetes.io/docs/tasks/run-application/update-deployment-rolling/) |
+| Checked rollout status and history, then rolled back a broken image | [kubectl rollout](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/) |
+| Fixed the manifest after the undo so `kubectl apply -f` didn't bring the broken image back | [Declarative Management of Kubernetes Objects Using Configuration Files](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/) |
