@@ -372,3 +372,18 @@ service "whoami" deleted from default namespace
 - ClusterIP is for internal traffic, and LoadBalancer is for traffic from outside. On AKS, a LoadBalancer Service creates a real Azure Load Balancer.
 - A Service balances connections, not requests, which is why a browser can appear to stick to one pod.
 - When a Service does not respond, check its endpoints before anything else.
+
+---
+
+## References
+
+Official documentation I used while building, testing and debugging this lab.
+
+| What I did | Documentation |
+|---|---|
+| Created ClusterIP and LoadBalancer Services in front of the Deployment | [Service](https://kubernetes.io/docs/concepts/services-networking/service/) |
+| Matched the Service selector to the Pod labels | [Labels and Selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/) |
+| Checked which Pod IPs were behind the Service | [EndpointSlices](https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/) |
+| Reached the Service by name from inside the cluster using CoreDNS | [DNS for Services and Pods](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/) |
+| Debugged a selector mismatch that left the Service with no endpoints | [Debug Services](https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/) |
+| Reached the LoadBalancer Service on localhost in Docker Desktop | [How Kubernetes works under the hood with Docker Desktop (Docker blog)](https://www.docker.com/blog/how-kubernetes-works-under-the-hood-with-docker-desktop/) |
