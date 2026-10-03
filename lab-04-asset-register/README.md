@@ -1,91 +1,296 @@
-# Lab 04 – Asset Register and PostgreSQL on Kubernetes
+# Lab 04: The Asset Register and PostgreSQL
 
-In this lab I moved my Asset Register app and its PostgreSQL database from Docker Compose onto Kubernetes. It is the same app I built in my [docker-asset-register](https://github.com/iM-MQ/docker-asset-register) project, pulled from GitHub Container Registry using the image my CI pipeline published.
+## Overview
 
-The aim was to rebuild each part of the Compose setup using the proper Kubernetes object, then test that the data survives, the app waits for the database, and a bad release never reaches users.
+| | |
+|---|---|
+| **Goal** | Run my Asset Register app and its PostgreSQL database on Kubernetes, then test that the data survives, the app waits for the database, and a broken release never reaches users |
+| **Runs on** | Docker Desktop's built-in Kubernetes, on my laptop |
+| **Cost** | Free |
+| **Time** | About 90 minutes |
 
-![Asset Register running on Kubernetes](images/asset-register-k8s.png)
+Labs 01 to 03 used test images. This time I ran a real application: the IT Asset Register from my [Docker project](https://github.com/iM-MQ/docker-asset-register), using the exact image my GitHub Actions pipeline published, pinned to its commit. The app needs a database, a password, settings and storage that outlives the pods, so this lab brings in the Kubernetes objects for each of those.
 
-## What this lab demonstrates
+```
+ Browser ──► Service "asset-register" (LoadBalancer, localhost:8082)
+                 │
+     ┌───────────┼───────────┐
+    Pod         Pod         Pod          Asset Register (3 copies)
+     └───────────┼───────────┘
+                 ▼
+           Service "postgres" (ClusterIP, inside the cluster only)
+                 │
+                Pod                      PostgreSQL 16
+                 │
+           PersistentVolumeClaim         1Gi, survives the pod being replaced
 
-- Storing the database password in a **Secret**, created with kubectl so it never touches the repo
-- Keeping non-secret settings in a **ConfigMap** shared by the app and the database
-- Persisting database data with a **PersistentVolumeClaim**
-- An **init container** that waits for PostgreSQL before the app starts
-- **Readiness and liveness probes** on both the app and the database
-- An internal **ClusterIP** Service for the database and an external **LoadBalancer** Service for the app
-- Debugging a stuck rollout caused by a broken readiness probe
-
-## Architecture
-
-```mermaid
-flowchart LR
-    user([Browser]) -->|localhost:8082| svcapp[Service: asset-register<br/>LoadBalancer]
-    svcapp --> app1[Pod: asset-register]
-    svcapp --> app2[Pod: asset-register]
-    svcapp --> app3[Pod: asset-register]
-    app1 & app2 & app3 -->|postgres:5432| svcdb[Service: postgres<br/>ClusterIP]
-    svcdb --> db[Pod: postgres]
-    db --> pvc[(PVC: postgres-data<br/>1Gi)]
-    cm[ConfigMap: asset-config] -.-> app1 & db
-    sec[Secret: asset-db] -.-> app1 & db
+ ConfigMap "asset-config" ─► settings for both      Secret "asset-db" ─► password for both
 ```
 
-## How Compose maps to Kubernetes
+### From Compose to Kubernetes
 
-| In Compose | In Kubernetes |
+Every part of my `compose.yaml` has a Kubernetes equivalent:
+
+| In Docker Compose | In Kubernetes |
 |---|---|
 | `DB_HOST`, `DB_NAME`, `DB_USER` | ConfigMap `asset-config` |
 | `POSTGRES_PASSWORD` / `DB_PASSWORD` | Secret `asset-db` |
 | `dbdata` named volume | PersistentVolumeClaim `postgres-data` |
-| `depends_on: service_healthy` | Init container `wait-for-postgres` |
+| `depends_on: condition: service_healthy` | An init container, `wait-for-postgres` |
 | `pg_isready` healthcheck | Readiness and liveness probes on Postgres |
 | Dockerfile `HEALTHCHECK` on `/health` | Readiness and liveness probes on the app |
-| `backend` network with `internal: true` | ClusterIP Service (not reachable from outside the cluster) |
-| `127.0.0.1:8080:5000` | LoadBalancer Service on `localhost:8082` |
-| `mem_limit` | Resource requests and limits |
+| `backend` network with `internal: true` | A ClusterIP Service, reachable only inside the cluster |
+| `127.0.0.1:8080:5000` | A LoadBalancer Service on `localhost:8082` |
+| `mem_limit` | CPU and memory requests and limits |
 
-## Files
+---
 
-| File | What it creates |
+## Following along?
+
+- I ran every command in **PowerShell** from `C:\kubernetes-labs`, using the terminal inside **VS Code**.
+- Each command is in its own box. Run **one line at a time**.
+- Boxes marked **What I saw** show my output. They are not commands to run.
+- Pod names, IP addresses and volume names will differ on your machine.
+- Commands ending in `-w` keep watching. Press **Ctrl + C** to get the prompt back once you have seen what you need.
+- The image is public on GitHub Container Registry, so no sign-in is needed to pull it.
+
+See the [main README prerequisites](../README.md#prerequisites), and Labs [01](../lab-01-first-cluster), [02](../lab-02-deployments) and [03](../lab-03-services) for the basics.
+
+---
+
+## The manifests
+
+The password is the one thing not in a file. I created it with a command (Step 1) so it never goes near Git.
+
+### `configmap.yaml`
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asset-config
+  labels:
+    app: asset-register
+data:
+  DB_HOST: postgres
+  DB_NAME: assets
+  DB_USER: assetapp
+```
+
+`DB_HOST: postgres` is the name of the database Service. CoreDNS turns that name into the Service's IP, as in Lab 03.
+
+### `pvc.yaml`
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  labels:
+    app: asset-register
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+| Part | Meaning |
 |---|---|
-| `configmap.yaml` | ConfigMap with the database host, name and user |
-| `pvc.yaml` | 1Gi PersistentVolumeClaim for the database |
-| `postgres.yaml` | PostgreSQL Deployment and ClusterIP Service |
-| `app.yaml` | Asset Register Deployment (with init container) and LoadBalancer Service |
+| `PersistentVolumeClaim` | A request for storage. The cluster's StorageClass creates the actual volume |
+| `ReadWriteOnce` | Only one node can mount it at a time, which suits a single database |
+| No `storageClassName` | Uses the cluster's default, which on Docker Desktop is `hostpath` |
 
-The Secret is not in the repo. It is created with a command (step 2).
+### `postgres.yaml`
 
-## Prerequisites
-
-- Docker Desktop with Kubernetes enabled (I used the Kubeadm option, v1.36.1)
-- kubectl pointing at the `docker-desktop` context
-- The Asset Register image published to GHCR (mine is public, so no pull secret is needed)
-
-## How I built it
-
-### Step 1 – Checked the cluster
-
-```powershell
-kubectl config current-context
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: asset-config
+                  key: DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: asset-config
+                  key: DB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: asset-db
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
 ```
 
-```powershell
-kubectl get nodes
+| Part | Meaning |
+|---|---|
+| `strategy: Recreate` | A normal rolling update starts the new pod before stopping the old one. Two databases writing the same files would corrupt them, so Recreate stops the old pod first |
+| `configMapKeyRef` / `secretKeyRef` | Postgres reads its settings from the ConfigMap and its password from the Secret, so nothing is hard-coded |
+| `PGDATA` in a subfolder | Cloud disks such as Azure Disk come with a `lost+found` folder, and Postgres will not set up in a folder that is not empty. Using a subfolder now means the same file works on AKS |
+| Readiness probe | The same `pg_isready` check as my Compose healthcheck. The Service only sends traffic once it passes |
+| Liveness probe | The same check with a longer delay. If Postgres hangs, the container is restarted |
+| `type: ClusterIP` | Internal only, the Kubernetes version of `internal: true` in Compose |
+
+### `app.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asset-register
+  labels:
+    app: asset-register
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: asset-register
+  template:
+    metadata:
+      labels:
+        app: asset-register
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - until pg_isready -h "$DB_HOST" -p 5432; do echo "waiting for postgres"; sleep 2; done
+          envFrom:
+            - configMapRef:
+                name: asset-config
+      containers:
+        - name: web
+          image: ghcr.io/im-mq/docker-asset-register:295b250c1913f1f0a4afb685b95c44664b962bd3
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: asset-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: asset-db
+                  key: password
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: asset-register
+  labels:
+    app: asset-register
+spec:
+  type: LoadBalancer
+  selector:
+    app: asset-register
+  ports:
+    - port: 8082
+      targetPort: 5000
 ```
 
-**What I saw:**
+| Part | Meaning |
+|---|---|
+| `initContainers` | Runs before the app and keeps checking until Postgres answers. This replaces `depends_on` from Compose |
+| `envFrom: configMapRef` | Loads every key in the ConfigMap as an environment variable. It works because the key names match what `app.py` reads |
+| `secretKeyRef` | Loads the password from the Secret as `DB_PASSWORD` |
+| `httpGet` probes | The same `/health` check as the Dockerfile `HEALTHCHECK`, now run by Kubernetes |
+| Image pinned to a commit SHA | The cluster always runs the exact build my pipeline produced, never whatever `latest` happens to be |
+| Port 8082 | Avoids 8080, which clashed with Docker Compose in Lab 01 |
 
-```
-docker-desktop
+The app runs `init_db()` once when it starts, to create its table. That is why the init container matters: if the app starts before Postgres is ready, it crashes.
 
-NAME             STATUS   ROLES           AGE   VERSION
-docker-desktop   Ready    control-plane   43h   v1.36.1
-```
+---
 
-### Step 2 – Created the Secret
+## How I did it
 
-I created the Secret directly with kubectl so the password is never written to a file in the repo.
+### Step 1: Created the Secret
+
+I created the Secret with a command rather than a file, so the password is never written anywhere in the repository.
 
 ```powershell
 kubectl create secret generic asset-db --from-literal=password=<your-local-password>
@@ -95,7 +300,7 @@ kubectl create secret generic asset-db --from-literal=password=<your-local-passw
 kubectl describe secret asset-db
 ```
 
-**What I saw:** `describe` only shows the size of the value, not the value itself.
+**What I saw:**
 
 ```
 Type:  Opaque
@@ -105,15 +310,15 @@ Data
 password:  11 bytes
 ```
 
-I then decoded it to prove a point:
+`describe` shows only the size of the value. I then decoded it to see how well it was really protected:
 
 ```powershell
 [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((kubectl get secret asset-db -o jsonpath="{.data.password}")))
 ```
 
-It printed the password in plain text. A Secret is only **base64-encoded, not encrypted**, so anyone who can read Secrets in the namespace can read the password. For AKS I'll look at Azure Key Vault instead.
+It printed the password in plain text. A Secret is only **base64-encoded, not encrypted**. It keeps the password out of the code, but anyone allowed to read Secrets can read it. On AKS, Azure Key Vault is the stronger option.
 
-### Step 3 – Created the ConfigMap
+### Step 2: Created the ConfigMap
 
 ```powershell
 kubectl apply -f lab-04-asset-register\configmap.yaml
@@ -139,9 +344,9 @@ DB_USER:
 assetapp
 ```
 
-`DB_HOST` is set to `postgres`, which is the name of the database Service. CoreDNS resolves it to the Service IP.
+These values are shown in plain text, which is fine because none of them are secret.
 
-### Step 4 – Created the PersistentVolumeClaim
+### Step 3: Created the storage
 
 ```powershell
 kubectl apply -f lab-04-asset-register\pvc.yaml
@@ -165,9 +370,9 @@ NAME                                       CAPACITY   ACCESS MODES   RECLAIM POL
 pvc-4630fa3e-d305-4e5a-8a4f-7eb37613efd8   1Gi        RWO            Delete           Bound    default/postgres-data
 ```
 
-Docker Desktop's default `hostpath` StorageClass created the volume straight away. The reclaim policy is `Delete`, which means deleting the claim also deletes the data.
+The claim was `Bound` straight away, because Docker Desktop's `hostpath` StorageClass creates volumes as soon as they are asked for. The reclaim policy is `Delete`: deleting the claim deletes the data with it.
 
-### Step 5 – Deployed PostgreSQL
+### Step 4: Deployed PostgreSQL
 
 ```powershell
 kubectl apply -f lab-04-asset-register\postgres.yaml
@@ -190,19 +395,20 @@ kubectl get endpointslices -l kubernetes.io/service-name=postgres
 ```
 postgres-6d5c985b76-bq74k   1/1     Running   0          18s
 
+LOG:  database system was shut down at 2026-10-03 14:32:27 UTC
 LOG:  database system is ready to accept connections
 
 NAME             ADDRESSTYPE   PORTS   ENDPOINTS   AGE
 postgres-5t9dj   IPv4          5432    10.1.0.40   79s
 ```
 
-A few choices in `postgres.yaml`:
+The `was shut down` line is normal on first start: Postgres sets up the database with a temporary server, stops it, then starts properly. I also confirmed the database and user from the ConfigMap existed:
 
-- `strategy: Recreate` – a normal rolling update starts the new Pod before stopping the old one. Two Postgres instances writing to the same data files would corrupt them, so Recreate stops the old Pod first.
-- `PGDATA` set to a subfolder of the mount – cloud disks such as Azure Disk come with a `lost+found` folder and Postgres won't initialise into a folder that isn't empty. Using a subfolder now means the same manifest will work on AKS.
-- Readiness and liveness probes both run `pg_isready`, the same check I used in Compose.
+```powershell
+kubectl exec deployment/postgres -- psql -U assetapp -d assets -c "\conninfo"
+```
 
-### Step 6 – Deployed the Asset Register
+### Step 5: Deployed the Asset Register
 
 ```powershell
 kubectl apply -f lab-04-asset-register\app.yaml
@@ -232,15 +438,19 @@ NAME             TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)
 asset-register   LoadBalancer   10.109.71.72   localhost     8082:30152/TCP
 ```
 
-I opened `http://localhost:8082`, added two assets and they saved.
+The pod showed `0/1` until its readiness probe passed, and only then did the Service send it traffic. The init container found Postgres on its first check, because Postgres was already running.
 
-The image is pinned to the commit SHA my pipeline tagged, not `latest`, so the cluster always runs the exact build CI produced.
+I opened http://localhost:8082, added two assets and they saved. The footer showed which pod served the page.
 
-## Testing it
+![The Asset Register running on Kubernetes](images/asset-register-k8s.png)
 
-### Test 1 – Data survives a database restart
+At this point the Deployment had 1 replica. I scaled it to 3 in Test 3, and updated the file to match in Test 4.
 
-I deleted the Postgres Pod to check the data was on the volume and not inside the Pod.
+---
+
+## Tests I carried out
+
+### Test 1: The data survives the database pod being replaced
 
 ```powershell
 kubectl delete pod -l app=postgres
@@ -257,20 +467,18 @@ kubectl describe pod -l app=postgres | Select-String "ClaimName"
 **What I saw:**
 
 ```
-pod "postgres-6d5c985b76-bq74k" deleted
+pod "postgres-6d5c985b76-bq74k" deleted from default namespace
 
 postgres-6d5c985b76-mfvq8   1/1     Running   0          8s
 
     ClaimName:  postgres-data
 ```
 
-A new Pod (`mfvq8`) replaced the old one and mounted the same claim. Both assets were still there, and I added a third to prove writes worked against the new Pod. The app recovered without errors, which tells me it opens a fresh database connection per request.
+A new pod, `mfvq8`, replaced the old one and mounted the same claim. Both assets were still listed. I added a third, `KB-0311`, to prove the app could write to the new pod and that I was not looking at a cached page. The app recovered without any errors, which shows it opens a fresh database connection for each request.
 
-### Test 2 – The app waits for the database
+### Test 2: The app waits for the database
 
-The app runs `init_db()` once at start-up. If Postgres isn't ready, it would crash. Compose solved this with `depends_on`; Kubernetes doesn't have that, so I used an init container.
-
-To test it, I stopped Postgres and forced a new app Pod to start.
+I stopped Postgres, then forced a new app pod to start without it.
 
 ```powershell
 kubectl scale deployment postgres --replicas=0
@@ -291,6 +499,7 @@ kubectl logs deployment/asset-register -c wait-for-postgres --tail=4
 **What I saw:**
 
 ```
+NAME                              READY   STATUS     RESTARTS   AGE
 asset-register-7c7df87c58-fzlsz   0/1     Init:0/1   0          44s
 
 postgres:5432 - no response
@@ -299,7 +508,7 @@ postgres:5432 - no response
 waiting for postgres
 ```
 
-Then I brought Postgres back:
+The app container never started, so it could not crash. Then I brought Postgres back:
 
 ```powershell
 kubectl scale deployment postgres --replicas=1
@@ -314,9 +523,9 @@ asset-register-7c7df87c58-fzlsz   0/1     Running   0          72s
 asset-register-7c7df87c58-fzlsz   1/1     Running   0          75s
 ```
 
-The app started by itself with **0 restarts**. Without the init container this would have been a `CrashLoopBackOff`.
+The app started by itself with **0 restarts**, and all three assets were still there. Without the init container, `init_db()` would have failed and the pod would have gone into `CrashLoopBackOff`.
 
-### Test 3 – Scaling and load balancing
+### Test 3: Scaling and load balancing
 
 ```powershell
 kubectl scale deployment asset-register --replicas=3
@@ -344,15 +553,17 @@ Served by container asset-register-7c7df87c58-fzlsz | 3 assets
 Served by container asset-register-7c7df87c58-fzlsz | 3 assets
 ```
 
-Three Pods shared the traffic and all of them showed the same 3 assets, because they share one database. I used `curl.exe` rather than a browser, because a browser keeps its connection open and sticks to one Pod.
+All three pods answered, and every one showed the same 3 assets because they share one database. Scaling was safe here because the table already existed, so `init_db()` had nothing to create.
 
-## Issues I hit
+### Test 4: A broken readiness probe
 
-### 1. A broken readiness probe stalled the rollout
+To see what Kubernetes does with a bad release, I changed the readiness probe path in `app.yaml` from `/health` to `/healthz`, which does not exist in the app. In the same edit I changed `replicas: 1` to `replicas: 3`, because I had scaled with a command in Test 3 and the file needed to match, or `apply` would have scaled it back down (the drift lesson from Lab 02).
 
-I deliberately changed the readiness probe path from `/health` to `/healthz` (which doesn't exist) and applied it, to see what Kubernetes does with a bad release. At the same time I changed `replicas: 1` to `replicas: 3` in the file, because I had scaled with a command and the file needed to match the cluster.
+```powershell
+kubectl apply -f lab-04-asset-register\app.yaml
+```
 
-**Symptom:** the rollout never finished.
+**Symptom.** The rollout never finished.
 
 ```powershell
 kubectl rollout status deployment/asset-register
@@ -362,18 +573,21 @@ kubectl rollout status deployment/asset-register
 Waiting for deployment "asset-register" rollout to finish: 1 out of 3 new replicas have been updated...
 ```
 
+**Investigation.**
+
 ```powershell
 kubectl get pods -l app=asset-register
 ```
 
 ```
+NAME                              READY   STATUS    RESTARTS   AGE
 asset-register-7c7df87c58-fzlsz   1/1     Running   0          42m
 asset-register-7c7df87c58-mppvv   1/1     Running   0          40m
 asset-register-7c7df87c58-mvzqq   1/1     Running   0          40m
 asset-register-f7567474b-mmz79    0/1     Running   0          9m27s
 ```
 
-**Investigation:**
+The new pod belonged to a new ReplicaSet (`f7567474b`) and had been stuck at `0/1` for over nine minutes.
 
 ```powershell
 kubectl describe pod asset-register-f7567474b-mmz79 | Select-String "Readiness"
@@ -384,19 +598,26 @@ Readiness:  http-get http://:5000/healthz delay=5s timeout=1s period=5s #success
 Warning  Unhealthy  5m (x64 over 10m)  kubelet  Readiness probe failed: HTTP probe failed with statuscode: 404
 ```
 
-The app returned 404 because the route is `/health`, not `/healthz`.
+```powershell
+1..3 | ForEach-Object { (curl.exe -s http://localhost:8082 | Select-String "Served by").Line.Trim() }
+```
 
-**What this showed me:**
+```
+Served by container asset-register-7c7df87c58-fzlsz | 3 assets
+Served by container asset-register-7c7df87c58-mppvv | 3 assets
+Served by container asset-register-7c7df87c58-mppvv | 3 assets
+```
 
-- The new Pod never received traffic. The three old Pods kept serving users the whole time.
-- The broken Pod had **0 restarts**. Only the readiness probe was wrong; the liveness probe still used `/health`, so Kubernetes knew the container was alive and left it alone.
+**Root cause.** The probe was asking for `/healthz`, and the app returned 404 Not Found 64 times in a row. Only the old pods were answering users.
+
+The broken pod also had **0 restarts**. Only the readiness probe was wrong. The liveness probe still checked `/health`, so Kubernetes knew the container was alive and left it running, just without traffic.
 
 | Probe | What happens when it fails |
 |---|---|
-| Readiness | Pod is removed from the Service – no traffic, no restart |
-| Liveness | Container is restarted |
+| Readiness | The pod is removed from the Service. No traffic, but no restart |
+| Liveness | The container is restarted |
 
-**Fix:** I corrected the path in `app.yaml` and applied it again, rather than using `kubectl rollout undo`. Undo fixes the cluster but leaves the mistake in the file, so the next `apply` would bring it back (I learned that in Lab 02).
+**Fix.** I corrected the path in the file and applied it again, rather than using `kubectl rollout undo`. As I found in Lab 02, undo fixes the cluster but not the file.
 
 ```powershell
 kubectl apply -f lab-04-asset-register\app.yaml
@@ -415,45 +636,76 @@ asset-register-7c7df87c58-mvzqq   1/1     Running       0          42m
 asset-register-f7567474b-mmz79    0/1     Terminating   0          11m
 ```
 
-I expected three new Pods, but Kubernetes kept the original three. Once the path was fixed, the Pod template matched the original ReplicaSet (`7c7df87c58`) exactly, so Kubernetes scaled the broken ReplicaSet down to zero and reused the healthy one. Nothing restarted and users saw no change.
+I expected three new pods, but Kubernetes kept the original three. With the path fixed, the pod template matched the original ReplicaSet (`7c7df87c58`) exactly, so Kubernetes scaled the broken ReplicaSet to zero and reused the healthy one. Nothing restarted and users saw no change.
 
-### 2. PowerShell rejected a placeholder
+**Lesson.** A readiness probe stops a broken release from ever receiving traffic. The rollout stalled safely instead of causing an outage.
+
+---
+
+## Issues I hit and how I fixed them
+
+### PowerShell rejected a placeholder
+
+**Symptom.** A `describe` command failed before it reached Kubernetes:
 
 ```
 The '<' operator is reserved for future use.
 ```
 
-I had pasted a command with `<name-of-the-pod>` still in it. PowerShell treats `<` as a special character. I replaced it with the real Pod name and it worked.
+**Root cause.** I had run the command with a placeholder, `<name-of-the-pod>`, still in it. PowerShell treats `<` as a special character.
 
-## Security practices
+**Fix.** I replaced the placeholder with the real pod name from `kubectl get pods`.
 
-- The database password is in a Secret created with kubectl, not in any file in the repo
-- I scanned the manifests for the word "password" before committing; the only matches were variable and key names
-- The database is only reachable inside the cluster (ClusterIP)
-- The app image runs as a non-root user (set in the Dockerfile)
-- The image is pinned to a commit SHA, not `latest`
-- Every container has CPU and memory requests and limits
+**Lesson.** Replace every placeholder before running a command, including the angle brackets.
 
-## Cleaning up
+---
+
+## Clean up
+
+`kubectl delete` accepts a folder, so one command removed everything the manifests created:
 
 ```powershell
 kubectl delete -f lab-04-asset-register
 ```
 
+The Secret was created with a command, so it needed removing separately:
+
 ```powershell
 kubectl delete secret asset-db
 ```
 
-Deleting `pvc.yaml` removes the claim, and because the reclaim policy is `Delete`, the data goes with it.
+Because the reclaim policy is `Delete`, removing the claim also deleted the volume and the data on it.
+
+---
+
+## Command reference
+
+| Command | What it does |
+|---|---|
+| `kubectl create secret generic <name> --from-literal=<key>=<value>` | Creates a Secret without writing it to a file |
+| `kubectl describe secret <name>` | Shows a Secret's keys and sizes, not the values |
+| `kubectl get secret <name> -o jsonpath="{.data.<key>}"` | Shows a Secret's value, base64-encoded |
+| `kubectl describe configmap <name>` | Shows a ConfigMap's keys and values |
+| `kubectl get pvc` | Lists PersistentVolumeClaims and whether they are bound |
+| `kubectl get pv` | Lists the volumes, with their reclaim policy |
+| `kubectl logs deployment/<name> -c <container>` | Shows the output of one container, such as an init container |
+| `kubectl exec deployment/<name> -- <command>` | Runs a command inside a Deployment's pod |
+| `kubectl scale deployment <name> --replicas=0` | Stops all of a Deployment's pods without deleting it |
+| `kubectl rollout status deployment/<name>` | Follows a rollout until it finishes |
+| `kubectl describe pod <name> \| Select-String "Readiness"` | Shows the readiness probe setting and any failures |
+| `kubectl delete -f <folder>` | Deletes everything defined in a folder of manifests |
 
 ## What I learned
 
-- Kubernetes has no `depends_on`. An init container is a clean way to make an app wait for its dependencies.
-- A Secret is base64-encoded, not encrypted. It keeps the password out of the repo, but it is not a vault.
-- A readiness probe protects users from a broken release; a liveness probe restarts a hung container. They do different jobs.
-- Postgres should use `Recreate`, not a rolling update, so two instances never write to the same data.
-- Kubernetes identifies a version by its Pod template. Going back to a known-good template reuses the existing ReplicaSet.
-- If I change something with a command, I update the file too, or the next `apply` undoes it.
+- Kubernetes has no `depends_on`. An init container makes an app wait for what it needs, and it proved itself when Postgres was switched off.
+- A Secret is base64-encoded, not encrypted. It keeps the password out of the code, but it is not a vault.
+- A PersistentVolumeClaim keeps the data separate from the pod, so the database pod can be deleted and replaced without losing anything.
+- A readiness probe and a liveness probe do different jobs: one decides whether a pod gets traffic, the other decides whether it is restarted.
+- A database should use the `Recreate` strategy so two copies never write to the same files.
+- Kubernetes identifies a version by its pod template. Returning to a known-good template reuses the existing ReplicaSet.
+- When I change something with a command, I update the file too, or the next `apply` undoes it.
+
+---
 
 ## References
 
@@ -469,6 +721,6 @@ Official documentation I used while building, testing and debugging this lab.
 | Made the app wait for Postgres with an init container | [Init Containers](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/) |
 | Added readiness and liveness probes (exec and httpGet) | [Configure Liveness, Readiness and Startup Probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/) |
 | Exposed Postgres internally and the app externally | [Service](https://kubernetes.io/docs/concepts/services-networking/service/) |
-| Checked the Pod IPs behind each Service | [EndpointSlices](https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/) |
+| Checked the pod IPs behind each Service | [EndpointSlices](https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/) |
 | Scaled the app to three replicas | [Horizontal Manual Scaling for a Deployment](https://kubernetes.io/docs/tasks/run-application/scale-deployment/) |
-| Debugged the stuck rollout | [Update a Deployment Without Downtime](https://kubernetes.io/docs/tasks/run-application/update-deployment-rolling/) |
+| Debugged the stalled rollout | [Update a Deployment Without Downtime](https://kubernetes.io/docs/tasks/run-application/update-deployment-rolling/) |
