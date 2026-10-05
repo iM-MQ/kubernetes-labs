@@ -12,7 +12,7 @@ These labs follow on from my [Docker Asset Register](https://github.com/iM-MQ/do
 | [02](lab-02-deployments) | Deployments: self-healing, scaling, drift, rolling updates and rollback | Complete ✅ |
 | [03](lab-03-services) | Services: stable addresses, load balancing, external access and selector debugging | Complete ✅ |
 | [04](lab-04-asset-register) | The Asset Register and PostgreSQL on Kubernetes: Secret, ConfigMap, PVC, init container and probes | Complete ✅ |
-| 05 | Capstone: AKS built with Terraform, running the Asset Register | Planned ⏳ |
+| [05](lab-05-aks) | Capstone: AKS built with Terraform, running the Asset Register, with a real troubleshooting investigation | Complete ✅ |
 
 ## What is Kubernetes?
 
