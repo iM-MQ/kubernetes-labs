@@ -1,5 +1,5 @@
-# Real secret values: never commit
-*secret*.local.yaml
+# Real secret values and environment-specific settings: never commit
+*.local.yaml
 .env
 
 # Terraform (used in Lab 05)
