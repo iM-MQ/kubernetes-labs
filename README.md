@@ -57,7 +57,7 @@ Kubernetes adds real complexity. For a single small application, a simpler platf
 
 ## Practices followed
 
-- Every resource is defined in a YAML manifest and applied with `kubectl apply`, rather than created by hand
+- Every resource is defined in a YAML manifest and applied with `kubectl apply`, rather than created by hand. The one exception is Secrets, which I create with `kubectl create secret` so the values are never written to a file
 - Container images are pinned to specific versions, never `latest`
 - Every container has CPU and memory requests and limits
 - Secret values and kubeconfig files are never committed (see `.gitignore`)
